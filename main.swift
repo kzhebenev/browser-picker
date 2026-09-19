@@ -119,18 +119,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if isBrowser { LinkCatcher.enableWebAccessibility(pid: front.processIdentifier, bundleID: frontID) }
         guard let (url, pid) = LinkCatcher.link(at: point), pid != getpid() else {
             if triggered {
-                Log.write("клик с модификатором в \(frontID) (\(Int(point.x)),\(Int(point.y))): ссылки нет, под курсором \(LinkCatcher.describe(at: point))")
+                Log.write("клик с модификатором в \(frontID): ссылки нет, под курсором \(LinkCatcher.describe(at: point))")
             }
             return .pass
         }
-        Log.write("клик в \(frontID) по \(url.absoluteString)")
 
         if triggered {
             let preselected = config.rule(for: url)?.browser ?? config.defaultBrowser
+            Log.write("окно выбора для \(url.host(percentEncoded: false) ?? "?")")
             return .swallow { [weak self] in self?.showPicker([url], preselected: preselected) }
         }
         guard let rule = config.rule(for: url), rule.browser != frontID,
               NSWorkspace.shared.urlForApplication(withBundleIdentifier: rule.browser) != nil else { return .pass }
+        Log.write("\(url.host(percentEncoded: false) ?? "?") по правилу \(rule.pattern) -> \(rule.browser)")
         return .swallow { Browsers.open([url], with: rule.browser) }
     }
 
