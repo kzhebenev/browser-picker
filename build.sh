@@ -4,7 +4,7 @@ set -euo pipefail
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
 APP="$DIR/build/BrowserPicker.app"
-SOURCES=("$DIR/Config.swift" "$DIR/Browsers.swift" "$DIR/Picker.swift" "$DIR/SettingsView.swift" "$DIR/main.swift")
+SOURCES=("$DIR/Config.swift" "$DIR/Browsers.swift" "$DIR/Picker.swift" "$DIR/LinkCatcher.swift" "$DIR/SettingsView.swift" "$DIR/main.swift")
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
@@ -65,5 +65,20 @@ if [ ! -f "$DIR/icon/AppIcon.icns" ] || [ "$DIR/icon/make-icon.swift" -nt "$DIR/
 fi
 cp "$DIR/icon/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 
-codesign --force -s - "$APP"
+# Разрешение «Универсальный доступ» macOS привязывает к подписи. Ad-hoc подпись меняется
+# с каждой сборкой, поэтому подписываем постоянным самоподписанным сертификатом.
+KEYCHAIN="$HOME/Library/Keychains/browserpicker.keychain-db"
+CN="BrowserPicker Self-Signed"
+PASSFILE="$HOME/Library/Application Support/BrowserPicker/signing.pass"
+if [ ! -f "$KEYCHAIN" ] || [ ! -f "$PASSFILE" ]; then
+    "$DIR/setup-signing.sh"
+fi
+PASS="$(cat "$PASSFILE" 2>/dev/null || true)"
+if [ -n "$PASS" ] && security unlock-keychain -p "$PASS" "$KEYCHAIN" 2>/dev/null \
+    && security find-identity -v -p codesigning "$KEYCHAIN" 2>/dev/null | grep -q "$CN"; then
+    codesign --force --keychain "$KEYCHAIN" -s "$CN" "$APP"
+else
+    echo "Внимание: подпись ad-hoc — после каждой пересборки доступ к кликам придётся выдавать заново."
+    codesign --force -s - "$APP"
+fi
 echo "Готово: $APP"

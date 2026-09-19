@@ -10,6 +10,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private var pickers: [PickerController] = []
     private var settingsWindow: NSWindow?
+    let catcher = LinkCatcher()
+    private var browserIDs = Set<String>()
+    private var browserIDsUpdated = Date.distantPast
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         buildMainMenu()
@@ -20,10 +23,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.delegate = self
         statusItem.menu = menu
 
-        // Первый ручной запуск: сразу показать настройки, чтобы назначить браузером по умолчанию
+        catcher.decide = { [weak self] point, flags in
+            self?.decideClick(at: point, flags: flags) ?? .pass
+        }
+        if !LinkCatcher.isTrusted { LinkCatcher.promptForTrust() }
+        catcher.start()
+
+        // Нет доступа к кликам — сразу показать настройки
         // (событие со ссылкой при запуске может прийти чуть позже didFinishLaunching)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { [self] in
-            if !Browsers.isDefaultBrowser && !launchedByURL { showSettings() }
+            if !LinkCatcher.isTrusted && !launchedByURL { showSettings() }
         }
     }
 
@@ -89,6 +98,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    // Клик внутри приложения: ⌥⌘ по ссылке — окно выбора; обычный клик в браузере
+    // по сайту с правилом на другой браузер — сразу туда. Иначе клик идёт как обычно.
+    private func decideClick(at point: CGPoint, flags: NSEvent.ModifierFlags) -> LinkCatcher.Decision {
+        guard let front = NSWorkspace.shared.frontmostApplication,
+              front.processIdentifier != getpid() else { return .pass }
+        store.reloadIfChanged()
+        let config = store.config
+        let frontID = front.bundleIdentifier ?? ""
+        let triggered = config.trigger.isPressed(flags)
+        let isBrowser = knownBrowserIDs().contains(frontID)
+
+        if !triggered {
+            guard config.applyRulesInBrowsers, isBrowser,
+                  config.rules.contains(where: { $0.browser != frontID }) else { return .pass }
+        }
+        if isBrowser { LinkCatcher.enableWebAccessibility(pid: front.processIdentifier, bundleID: frontID) }
+        guard let (url, pid) = LinkCatcher.link(at: point), pid != getpid() else {
+            if triggered { NSLog("BrowserPicker: клик с модификатором в \(frontID): ссылки под курсором нет") }
+            return .pass
+        }
+        NSLog("BrowserPicker: клик в \(frontID) по \(url.absoluteString)")
+
+        if triggered {
+            let preselected = config.rule(for: url)?.browser ?? config.defaultBrowser
+            return .swallow { [weak self] in self?.showPicker([url], preselected: preselected) }
+        }
+        guard let rule = config.rule(for: url), rule.browser != frontID,
+              NSWorkspace.shared.urlForApplication(withBundleIdentifier: rule.browser) != nil else { return .pass }
+        return .swallow { Browsers.open([url], with: rule.browser) }
+    }
+
+    private func knownBrowserIDs() -> Set<String> {
+        if Date().timeIntervalSince(browserIDsUpdated) > 60 {
+            browserIDs = Set(Browsers.all().map(\.id))
+            browserIDsUpdated = Date()
+        }
+        return browserIDs
+    }
+
     private func showPicker(_ urls: [URL], preselected: String) {
         let browsers = Browsers.all()
         var controller: PickerController!
@@ -109,14 +157,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
-        let isDefault = Browsers.isDefaultBrowser
-        let status = NSMenuItem(title: isDefault ? "Ссылки идут через BrowserPicker"
-                                                 : "Не назначен браузером по умолчанию",
-                                action: nil, keyEquivalent: "")
-        status.isEnabled = false
-        menu.addItem(status)
-        if !isDefault {
-            menu.addItem(item("Назначить браузером по умолчанию", #selector(makeDefault)))
+        if catcher.isRunning {
+            let status = NSMenuItem(title: "Клики по ссылкам перехватываются", action: nil, keyEquivalent: "")
+            status.isEnabled = false
+            menu.addItem(status)
+        } else {
+            menu.addItem(item("Дать доступ к кликам (Универсальный доступ)…", #selector(openAccessibility)))
+        }
+        if !Browsers.isDefaultBrowser {
+            menu.addItem(item("Ловить ссылки из других приложений…", #selector(makeDefault)))
         }
         menu.addItem(.separator())
         menu.addItem(item("Открыть ссылку из буфера…", #selector(openFromClipboard), key: "v"))
@@ -144,6 +193,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let i = NSMenuItem(title: title, action: action, keyEquivalent: key)
         i.target = target ?? self
         return i
+    }
+
+    @objc private func openAccessibility() {
+        LinkCatcher.promptForTrust()
+        LinkCatcher.openAccessibilitySettings()
     }
 
     @objc private func makeDefault() {

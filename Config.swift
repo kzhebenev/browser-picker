@@ -75,6 +75,8 @@ struct Config: Codable, Equatable {
     var defaultBrowser = "com.apple.Safari"
     var trigger = Trigger.optionCommand
     var rules: [Rule] = []
+    // Обычный клик по ссылке внутри браузера тоже отправлять по правилам
+    var applyRulesInBrowsers = true
 
     init() {}
 
@@ -83,6 +85,7 @@ struct Config: Codable, Equatable {
         defaultBrowser = try c.decodeIfPresent(String.self, forKey: .defaultBrowser) ?? "com.apple.Safari"
         trigger = (try? c.decodeIfPresent(Trigger.self, forKey: .trigger)) ?? .optionCommand
         rules = try c.decodeIfPresent([Rule].self, forKey: .rules) ?? []
+        applyRulesInBrowsers = try c.decodeIfPresent(Bool.self, forKey: .applyRulesInBrowsers) ?? true
     }
 
     // Из нескольких подходящих правил побеждает самое конкретное (длинный домен).

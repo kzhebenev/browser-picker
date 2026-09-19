@@ -7,24 +7,49 @@ struct SettingsView: View {
     @State private var isDefault = Browsers.isDefaultBrowser
     @State private var loginEnabled = SMAppService.mainApp.status == .enabled
     @State private var loginError: String?
+    @State private var trusted = LinkCatcher.isTrusted
+    private let refresh = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
 
     var body: some View {
         Form {
             Section {
                 HStack {
-                    Text(isDefault ? "BrowserPicker назначен браузером по умолчанию"
-                                   : "BrowserPicker не назначен браузером по умолчанию, ссылки его не достигнут")
-                        .foregroundStyle(isDefault ? Color.secondary : Color.red)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(trusted ? "Клики по ссылкам в Safari и других приложениях перехватываются"
+                                     : "Нет доступа к кликам: включите BrowserPicker в «Универсальном доступе»")
+                            .foregroundStyle(trusted ? Color.secondary : Color.red)
+                        if !trusted {
+                            Text("Системные настройки → Конфиденциальность и безопасность → Универсальный доступ")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
                     Spacer()
-                    if !isDefault {
-                        Button("Назначить") {
-                            Browsers.makeDefault { isDefault = Browsers.isDefaultBrowser }
+                    if !trusted {
+                        Button("Открыть") {
+                            LinkCatcher.promptForTrust()
+                            LinkCatcher.openAccessibilitySettings()
                         }
                     }
                 }
-                browserPicker("Открывать ссылки в", selection: $store.config.defaultBrowser)
                 Picker("Окно выбора при клике с", selection: $store.config.trigger) {
                     ForEach(Trigger.allCases) { Text($0.title).tag($0) }
+                }
+                Toggle("Обычный клик в браузере по сайту из правил открывать в браузере правила",
+                       isOn: $store.config.applyRulesInBrowsers)
+                browserPicker("Ссылки без правила открывать в", selection: $store.config.defaultBrowser)
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Ссылки из других приложений (почта, Telegram)")
+                        Text(isDefault ? "Идут через BrowserPicker: правила и ⌥⌘ работают и для них"
+                                       : "Сейчас идут прямо в браузер по умолчанию, мимо правил")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if !isDefault {
+                        Button("Ловить и их") {
+                            Browsers.makeDefault { isDefault = Browsers.isDefaultBrowser }
+                        }
+                    }
                 }
                 Toggle("Запускать при входе в систему", isOn: Binding(
                     get: { loginEnabled },
@@ -87,6 +112,10 @@ struct SettingsView: View {
             browsers = Browsers.all()
             isDefault = Browsers.isDefaultBrowser
             loginEnabled = SMAppService.mainApp.status == .enabled
+        }
+        .onReceive(refresh) { _ in
+            trusted = LinkCatcher.isTrusted
+            isDefault = Browsers.isDefaultBrowser
         }
     }
 
