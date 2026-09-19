@@ -11,12 +11,30 @@
 
 ## Установка
 
+На любом маке одной командой:
+
 ```bash
-./install.sh
+curl -fsSL https://raw.githubusercontent.com/kzhebenev/browser-picker/main/get.sh | bash
 ```
 
-Скрипт соберёт приложение (хватает Command Line Tools), прогонит самопроверку, поставит его в `/Applications` и запустит.
+Или скачать `BrowserPicker.dmg` из [релизов](https://github.com/kzhebenev/browser-picker/releases/latest) и перетащить в Applications.
+Приложение подписано самоподписанным сертификатом, поэтому после скачивания браузером снимите карантин:
+`xattr -dr com.apple.quarantine /Applications/BrowserPicker.app` (установка через `curl` этого не требует).
+
 Дальше разрешите BrowserPicker в «Универсальном доступе» и включите в настройках «Запускать при входе».
+
+## Обновления
+
+Приложение проверяет релизы при запуске и раз в сутки, а также по пункту меню «Версия …: проверить обновления».
+Все релизы подписаны одним сертификатом, поэтому «Универсальный доступ» после обновления сохраняется.
+
+Выпуск новой версии (с мака, где лежит сертификат подписи):
+
+```bash
+echo 1.2 > VERSION && git commit -am "v1.2: ..." && ./release.sh "что нового"
+```
+
+Из исходников (нужны Xcode Command Line Tools): `./install.sh`.
 
 ## Как ловятся клики внутри Safari
 

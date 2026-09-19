@@ -11,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var pickers: [PickerController] = []
     private var settingsWindow: NSWindow?
     let catcher = LinkCatcher()
+    private let updater = Updater()
     private var browserIDs = Set<String>()
     private var browserIDsUpdated = Date.distantPast
 
@@ -26,9 +27,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         catcher.decide = { [weak self] point, flags in
             self?.decideClick(at: point, flags: flags) ?? .pass
         }
-        Log.write("запуск \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] ?? ""), доступ к кликам: \(LinkCatcher.isTrusted ? "есть" : "нет")")
+        Log.write("запуск \(Updater.currentVersion), доступ к кликам: \(LinkCatcher.isTrusted ? "есть" : "нет")")
         if !LinkCatcher.isTrusted { LinkCatcher.promptForTrust() }
         catcher.start()
+        updater.start()
 
         // Нет доступа к кликам — сразу показать настройки
         // (событие со ссылкой при запуске может прийти чуть позже didFinishLaunching)
@@ -188,6 +190,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(defaults)
 
         menu.addItem(item("Настройки и правила…", #selector(showSettings), key: ","))
+        menu.addItem(item("Версия \(Updater.currentVersion): проверить обновления", #selector(checkUpdates)))
         menu.addItem(.separator())
         menu.addItem(item("Выйти из BrowserPicker", #selector(NSApplication.terminate(_:)), key: "q", target: NSApp))
     }
@@ -197,6 +200,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         i.target = target ?? self
         return i
     }
+
+    @objc private func checkUpdates() { updater.check(manual: true) }
 
     @objc private func openAccessibility() {
         LinkCatcher.promptForTrust()
