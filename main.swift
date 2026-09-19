@@ -26,6 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         catcher.decide = { [weak self] point, flags in
             self?.decideClick(at: point, flags: flags) ?? .pass
         }
+        Log.write("запуск \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] ?? ""), доступ к кликам: \(LinkCatcher.isTrusted ? "есть" : "нет")")
         if !LinkCatcher.isTrusted { LinkCatcher.promptForTrust() }
         catcher.start()
 
@@ -115,10 +116,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         if isBrowser { LinkCatcher.enableWebAccessibility(pid: front.processIdentifier, bundleID: frontID) }
         guard let (url, pid) = LinkCatcher.link(at: point), pid != getpid() else {
-            if triggered { NSLog("BrowserPicker: клик с модификатором в \(frontID): ссылки под курсором нет") }
+            if triggered {
+                Log.write("клик с модификатором в \(frontID) (\(Int(point.x)),\(Int(point.y))): ссылки нет, под курсором \(LinkCatcher.describe(at: point))")
+            }
             return .pass
         }
-        NSLog("BrowserPicker: клик в \(frontID) по \(url.absoluteString)")
+        Log.write("клик в \(frontID) по \(url.absoluteString)")
 
         if triggered {
             let preselected = config.rule(for: url)?.browser ?? config.defaultBrowser

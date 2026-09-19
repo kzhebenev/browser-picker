@@ -49,14 +49,14 @@ enum Browsers {
     static func open(_ urls: [URL], with bundleID: String) {
         var target = bundleID
         if target == ownID || NSWorkspace.shared.urlForApplication(withBundleIdentifier: target) == nil {
-            NSLog("BrowserPicker: браузер \(bundleID) не найден, открываю в Safari")
+            Log.write("браузер \(bundleID) не найден, открываю в Safari")
             target = "com.apple.Safari"
         }
         guard let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: target) else { return }
         let cfg = NSWorkspace.OpenConfiguration()
         cfg.activates = true
         NSWorkspace.shared.open(urls, withApplicationAt: appURL, configuration: cfg) { _, error in
-            if let error { NSLog("BrowserPicker: ошибка открытия в \(target): \(error)") }
+            if let error { Log.write("ошибка открытия в \(target): \(error)") }
         }
     }
 

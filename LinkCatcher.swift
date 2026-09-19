@@ -51,14 +51,14 @@ final class LinkCatcher {
                                               return me.handle(type, event)
                                           },
                                           userInfo: refcon) else {
-            NSLog("BrowserPicker: не удалось создать event tap")
+            Log.write("не удалось создать event tap")
             return false
         }
         let source = CFMachPortCreateRunLoopSource(nil, tap, 0)
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
         self.tap = tap
-        NSLog("BrowserPicker: перехват кликов включён")
+        Log.write("перехват кликов включён")
         return true
     }
 
@@ -119,6 +119,24 @@ final class LinkCatcher {
             element = next as! AXUIElement
         }
         return nil
+    }
+
+    // Для журнала: цепочка ролей от элемента под курсором вверх
+    static func describe(at point: CGPoint) -> String {
+        let system = AXUIElementCreateSystemWide()
+        AXUIElementSetMessagingTimeout(system, 0.25)
+        var hit: AXUIElement?
+        let err = AXUIElementCopyElementAtPosition(system, Float(point.x), Float(point.y), &hit)
+        guard err == .success, var element = hit else { return "AX ошибка \(err.rawValue)" }
+        var chain: [String] = []
+        for _ in 0..<8 {
+            chain.append(string(element, kAXRoleAttribute) ?? "?")
+            var parent: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(element, kAXParentAttribute as CFString, &parent) == .success,
+                  let next = parent, CFGetTypeID(next) == AXUIElementGetTypeID() else { break }
+            element = next as! AXUIElement
+        }
+        return chain.joined(separator: " < ")
     }
 
     private static func string(_ element: AXUIElement, _ attribute: String) -> String? {

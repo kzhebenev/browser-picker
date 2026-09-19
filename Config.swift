@@ -177,7 +177,7 @@ final class Store: ObservableObject {
             loadedModified = fileModified
             if loaded != config { config = loaded }
         } catch {
-            NSLog("BrowserPicker: не удалось прочитать \(fileURL.path): \(error)")
+            Log.write("не удалось прочитать \(fileURL.path): \(error)")
         }
     }
 

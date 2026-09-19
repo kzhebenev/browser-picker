@@ -4,7 +4,7 @@ set -euo pipefail
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
 APP="$DIR/build/BrowserPicker.app"
-SOURCES=("$DIR/Config.swift" "$DIR/Browsers.swift" "$DIR/Picker.swift" "$DIR/LinkCatcher.swift" "$DIR/SettingsView.swift" "$DIR/main.swift")
+SOURCES=("$DIR/Log.swift" "$DIR/Config.swift" "$DIR/Browsers.swift" "$DIR/Picker.swift" "$DIR/LinkCatcher.swift" "$DIR/SettingsView.swift" "$DIR/main.swift")
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
