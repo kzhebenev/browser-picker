@@ -88,6 +88,18 @@ struct Config: Codable, Equatable {
         applyRulesInBrowsers = try c.decodeIfPresent(Bool.self, forKey: .applyRulesInBrowsers) ?? true
     }
 
+    // Слияние при включении iCloud: общие настройки главнее, локальные правила
+    // для сайтов, которых в общих нет, добавляются в конец
+    static func merge(shared: Config, local: Config) -> Config {
+        var result = shared
+        var known = Set(shared.rules.map(\.normalizedPattern))
+        for rule in local.rules where !rule.normalizedPattern.isEmpty && !known.contains(rule.normalizedPattern) {
+            result.rules.append(rule)
+            known.insert(rule.normalizedPattern)
+        }
+        return result
+    }
+
     // Из нескольких подходящих правил побеждает самое конкретное (длинный домен).
     func rule(for url: URL) -> Rule? {
         guard let host = url.host(percentEncoded: false) else { return nil }
@@ -145,53 +157,136 @@ let govPresetSites = [
 
 final class Store: ObservableObject {
     static let shared = Store()
+    private static let iCloudKey = "iCloudSync"
 
     @Published var config: Config {
-        didSet { if config != oldValue { save() } }
+        didSet { if !isReloading && config != oldValue { save() } }
     }
 
-    let fileURL: URL
+    // Локальный файл: основной без iCloud и запасная копия с ним
+    let localURL: URL
     private var loadedModified: Date?
+    private var isReloading = false
+    private var pollTimer: Timer?
+
+    // Синхронизация включается на каждом маке отдельно, поэтому флаг — в UserDefaults, а не в конфиге
+    var iCloudSync: Bool { UserDefaults.standard.bool(forKey: Store.iCloudKey) }
+
+    // Папка в iCloud Drive, общая для всех маков пользователя
+    static var iCloudDirectory: URL? {
+        let base = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Mobile Documents/com~apple~CloudDocs")
+        guard FileManager.default.fileExists(atPath: base.path) else { return nil }
+        let dir = base.appendingPathComponent("BrowserPicker", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    // Текущий рабочий файл: в iCloud, если синхронизация включена и iCloud Drive доступен
+    var fileURL: URL {
+        if iCloudSync, let dir = Store.iCloudDirectory { return dir.appendingPathComponent("config.json") }
+        return localURL
+    }
 
     init() {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("BrowserPicker", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        fileURL = dir.appendingPathComponent("config.json")
+        localURL = dir.appendingPathComponent("config.json")
         config = Config()
-        if FileManager.default.fileExists(atPath: fileURL.path) {
-            reload()
-        } else {
-            save()
+        if !read(fileURL), !(fileURL != localURL && read(localURL)) {
+            if !FileManager.default.fileExists(atPath: fileURL.path) { save() }
+        }
+        // Правки с других маков приходят через iCloud, правки руками — в файл: следим за ним
+        pollTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
+            self?.reloadIfChanged()
         }
     }
 
-    private var fileModified: Date? {
-        (try? FileManager.default.attributesOfItem(atPath: fileURL.path))?[.modificationDate] as? Date
+    private func modified(_ url: URL) -> Date? {
+        (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date
     }
 
-    func reload() {
-        guard let data = try? Data(contentsOf: fileURL) else { return }
+    // Читает конфиг из файла; при успехе делает его текущим без обратной записи
+    @discardableResult
+    private func read(_ url: URL) -> Bool {
+        guard let data = try? Data(contentsOf: url) else {
+            requestDownload(url)
+            return false
+        }
         do {
             let loaded = try JSONDecoder().decode(Config.self, from: data)
-            loadedModified = fileModified
-            if loaded != config { config = loaded }
+            if url == fileURL { loadedModified = modified(url) }
+            if loaded != config {
+                isReloading = true
+                config = loaded
+                isReloading = false
+                if url != localURL { writeLocalCopy() }
+            }
+            return true
         } catch {
-            Log.write("не удалось прочитать \(fileURL.path): \(error)")
+            Log.write("не удалось прочитать \(url.path): \(error)")
+            return false
         }
     }
 
-    // Файл могли поправить руками — перечитываем, если он изменился
+    // iCloud с оптимизацией хранилища может выгрузить файл, оставив заглушку .config.json.icloud
+    private func requestDownload(_ url: URL) {
+        let placeholder = url.deletingLastPathComponent().appendingPathComponent(".\(url.lastPathComponent).icloud")
+        guard FileManager.default.fileExists(atPath: placeholder.path) else { return }
+        try? FileManager.default.startDownloadingUbiquitousItem(at: url)
+    }
+
+    func reload() { read(fileURL) }
+
+    // Файл мог измениться на другом маке или руками — перечитываем
     func reloadIfChanged() {
-        if fileModified != loadedModified { reload() }
+        if modified(fileURL) != loadedModified { reload() }
+    }
+
+    private func encoded(_ config: Config) -> Data? {
+        let enc = JSONEncoder()
+        enc.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        return try? enc.encode(config)
     }
 
     func save() {
-        let enc = JSONEncoder()
-        enc.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-        guard let data = try? enc.encode(config) else { return }
-        try? data.write(to: fileURL, options: .atomic)
-        loadedModified = fileModified
+        guard let data = encoded(config) else { return }
+        let url = fileURL
+        try? data.write(to: url, options: .atomic)
+        loadedModified = modified(url)
+        if url != localURL { writeLocalCopy() }
+    }
+
+    private func writeLocalCopy() {
+        guard let data = encoded(config) else { return }
+        try? data.write(to: localURL, options: .atomic)
+    }
+
+    // Включение/выключение iCloud. При включении правила этого мака добавляются к общим,
+    // остальные настройки берутся из iCloud, если там уже есть файл с другого мака.
+    func setICloud(_ on: Bool) -> Bool {
+        if on {
+            guard let dir = Store.iCloudDirectory else { return false }
+            let remote = dir.appendingPathComponent("config.json")
+            var merged = config
+            if let data = try? Data(contentsOf: remote),
+               let theirs = try? JSONDecoder().decode(Config.self, from: data) {
+                merged = Config.merge(shared: theirs, local: config)
+            }
+            UserDefaults.standard.set(true, forKey: Store.iCloudKey)
+            isReloading = true
+            config = merged
+            isReloading = false
+            save()
+            Log.write("настройки синхронизируются через iCloud: \(remote.path)")
+        } else {
+            UserDefaults.standard.set(false, forKey: Store.iCloudKey)
+            save()
+            Log.write("настройки хранятся локально")
+        }
+        objectWillChange.send()
+        return true
     }
 
     func setRule(pattern: String, browser: String) {

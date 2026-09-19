@@ -8,6 +8,7 @@ struct SettingsView: View {
     @State private var loginEnabled = SMAppService.mainApp.status == .enabled
     @State private var loginError: String?
     @State private var trusted = LinkCatcher.isTrusted
+    @State private var iCloudError: String?
     private let refresh = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
 
     var body: some View {
@@ -105,9 +106,32 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            Section {
+                Toggle(isOn: Binding(
+                    get: { store.iCloudSync },
+                    set: { on in
+                        iCloudError = store.setICloud(on) ? nil
+                            : "iCloud Drive недоступен: включите его в Системных настройках → Apple ID → iCloud."
+                    }
+                )) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Синхронизировать через iCloud Drive")
+                        Text(store.iCloudSync
+                             ? "Правила и настройки общие для всех маков с включённой синхронизацией"
+                             : "При включении правила этого мака добавятся к общим")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                if let iCloudError {
+                    Text(iCloudError).font(.caption).foregroundStyle(.red)
+                }
+            } header: {
+                Text("Синхронизация")
+            }
         }
         .formStyle(.grouped)
-        .frame(minWidth: 560, minHeight: 440)
+        .frame(minWidth: 560, minHeight: 520)
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             browsers = Browsers.all()
             isDefault = Browsers.isDefaultBrowser

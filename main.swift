@@ -307,6 +307,16 @@ func runSelfTest() -> Int32 {
     check(Rule(pattern: "госуслуги.рф", browser: "x").matches(host: "%D0%B3%D0%BE%D1%81%D1%83%D1%81%D0%BB%D1%83%D0%B3%D0%B8.%D1%80%D1%84"), "%-кодированный хост")
     check(pick("https://kontur.ru") == "k", "маска *.x.* и сам домен")
     check(pick("https://госуслуги.рф") == nil, "кириллица без правила")
+    var shared = Config()
+    shared.defaultBrowser = "shared-default"
+    shared.rules = [Rule(pattern: "nalog.ru", browser: "gost"), Rule(pattern: "a.ru", browser: "x")]
+    var local = Config()
+    local.defaultBrowser = "local-default"
+    local.rules = [Rule(pattern: "https://Nalog.ru", browser: "other"), Rule(pattern: "b.ru", browser: "y"), Rule(pattern: "", browser: "z")]
+    let merged = Config.merge(shared: shared, local: local)
+    check(merged.defaultBrowser == "shared-default", "слияние: общие настройки главнее")
+    check(merged.rules.map(\.pattern) == ["nalog.ru", "a.ru", "b.ru"], "слияние: правила без дублей и пустых")
+    check(merged.rule(for: URL(string: "https://nalog.ru")!)?.browser == "gost", "слияние: общее правило побеждает")
     check(Trigger.optionCommand.isPressed([.option, .command]), "триггер ⌥⌘")
     check(Trigger.optionCommand.isPressed([.option, .command, .shift]), "триггер с лишним Shift")
     check(!Trigger.optionCommand.isPressed([.command]), "только ⌘ не триггер")
